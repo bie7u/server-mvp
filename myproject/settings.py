@@ -146,4 +146,5 @@ REST_FRAMEWORK = {
 
 # Football Data API configuration
 # Get your API key from https://www.football-data.org/
-FOOTBALL_DATA_API_KEY = None  # Set this to your API key or use environment variable
+import os
+FOOTBALL_DATA_API_KEY = os.environ.get('FOOTBALL_DATA_API_KEY', None)
