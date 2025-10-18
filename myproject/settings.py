@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Packages
     'rest_framework',
+    'django_filters',
+    'django_cron',
     # Apps
     'users',
     'administration',
