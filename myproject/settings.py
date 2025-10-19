@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     # Packages
     'rest_framework',
     'django_filters',
-    'django_cron',
+    # 'django_cron',  # Temporarily disabled due to compatibility issue
     # Apps
     'users',
     'administration',
