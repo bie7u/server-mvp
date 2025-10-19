@@ -1,4 +1,5 @@
 from django.contrib.auth import login, logout
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -32,7 +33,8 @@ def login_view(request):
     """
     serializer = LoginSerializer(data=request.data)
     
-    if serializer.is_valid():
+    try:
+        serializer.is_valid(raise_exception=True)
         user = serializer.validated_data['user']
         # Create session and set HTTP-only cookie
         login(request, user)
@@ -44,21 +46,25 @@ def login_view(request):
             'user': user_serializer.data
         }, status=status.HTTP_200_OK)
     
-    # Check if errors are validation errors (bad request) or authentication errors
-    error_messages = []
-    for field, errors in serializer.errors.items():
-        for error in errors:
-            error_messages.append(str(error))
-    
-    # If error message contains "Invalid credentials" or "disabled", return 401
-    error_text = ' '.join(error_messages)
-    if 'Invalid credentials' in error_text or 'disabled' in error_text:
+    except DjangoValidationError:
+        # Authentication failure (invalid credentials or inactive account)
         return Response({
             'message': 'Invalid credentials'
         }, status=status.HTTP_401_UNAUTHORIZED)
-    
-    # Otherwise return 400 for validation errors
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        # Check if this is an authentication error from the serializer
+        if hasattr(serializer, 'errors') and serializer.errors:
+            # Check for non-field errors which typically contain auth failures
+            non_field_errors = serializer.errors.get('non_field_errors', [])
+            if non_field_errors:
+                return Response({
+                    'message': 'Invalid credentials'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            # Other validation errors (missing fields, etc.)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Re-raise unexpected errors
+        raise
 
 
 @api_view(['POST'])

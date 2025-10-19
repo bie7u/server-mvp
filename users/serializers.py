@@ -50,37 +50,45 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'role', 'clientId', 'clientName']
         read_only_fields = ['id', 'username', 'email']
 
+    def _get_client_user(self, obj):
+        """
+        Cache ClientUserM lookup to avoid N+1 queries.
+        """
+        if not hasattr(obj, '_cached_client_user'):
+            try:
+                obj._cached_client_user = ClientUserM.objects.select_related('client').get(user=obj)
+            except ClientUserM.DoesNotExist:
+                obj._cached_client_user = None
+        return obj._cached_client_user
+
     def get_role(self, obj):
         """
         Get user role from ClientUserM or determine if root_admin.
         """
-        try:
-            client_user = ClientUserM.objects.get(user=obj)
+        client_user = self._get_client_user(obj)
+        if client_user:
             if client_user.is_root_client_admin:
                 return 'root_admin'
             return client_user.role
-        except ClientUserM.DoesNotExist:
-            # If user is superuser/staff but not in ClientUserM, treat as root_admin
-            if obj.is_superuser or obj.is_staff:
-                return 'root_admin'
-            return None
+        # If user is superuser/staff but not in ClientUserM, treat as root_admin
+        if obj.is_superuser or obj.is_staff:
+            return 'root_admin'
+        return None
 
     def get_clientId(self, obj):
         """
         Get client ID if user is associated with a client.
         """
-        try:
-            client_user = ClientUserM.objects.get(user=obj)
-            return client_user.client.id if client_user.client else None
-        except ClientUserM.DoesNotExist:
-            return None
+        client_user = self._get_client_user(obj)
+        if client_user and client_user.client:
+            return client_user.client.id
+        return None
 
     def get_clientName(self, obj):
         """
         Get client name if user is associated with a client.
         """
-        try:
-            client_user = ClientUserM.objects.get(user=obj)
-            return client_user.client.name if client_user.client else None
-        except ClientUserM.DoesNotExist:
-            return None
+        client_user = self._get_client_user(obj)
+        if client_user and client_user.client:
+            return client_user.client.name
+        return None
