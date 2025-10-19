@@ -60,15 +60,50 @@ curl -X POST http://localhost:8000/api/logout/ \
 - **Token expiration**: Short-lived access tokens
 - **Token rotation**: Automatic refresh token rotation
 
+## Documentation
+
+### Complete API Documentation
+See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for comprehensive API documentation including:
+- All endpoint details with request/response examples
+- Query parameters and filtering options
+- Authentication requirements
+- Client integration examples (JavaScript, Python, cURL)
+- Database schema
+- Security considerations
+
+### Authentication Guide
+See [AUTHENTICATION_GUIDE.md](AUTHENTICATION_GUIDE.md) for HTTP-only cookie authentication including:
+- Complete authentication flow
+- Client integration examples (React, Vue.js, Python)
+- Troubleshooting common issues
+- Testing and integration examples
+- Security best practices
+
 ## API Endpoints
 
-See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for complete API documentation.
-
 ### Authentication Endpoints
-- `POST /api/login/` - Login and receive tokens
+- `POST /api/login/` - Login and receive tokens in HTTP-only cookies
 - `POST /api/logout/` - Logout and clear tokens
 - `POST /api/refresh/` - Refresh access token
 - `GET /api/me/` - Get current user info
+
+### Administration Endpoints (Admin only)
+- `GET/POST /admin-panel/clients/` - Manage client organizations
+- `GET/PUT/PATCH /admin-panel/clients/{id}/` - Client details and updates
+- `GET/POST /admin-panel/clients/{client_pk}/client-users/` - Manage client users
+- `GET/PUT/PATCH /admin-panel/clients/{client_pk}/client-users/{id}/` - User details
+
+### Leagues Endpoints (Public)
+- `GET /leagues/standings/` - Get league standings/tables
+- `GET /leagues/standings/{id}/` - Get specific standing
+- `GET /leagues/rounds/` - Get league rounds/matchweeks
+- `GET /leagues/rounds/{id}/` - Get specific round with matches
+- `GET /leagues/upcoming-matches/` - Get upcoming matches (next 7 days)
+
+### Predictions Endpoints (Authenticated)
+- `GET/POST /predictions/predictions/` - View and create predictions
+- `GET/PUT/PATCH/DELETE /predictions/predictions/{id}/` - Manage specific prediction
+- `GET /predictions/client-rankings/` - Get rankings for user's client
 
 ## Installation
 
@@ -91,7 +126,22 @@ python manage.py test
 
 # Run authentication tests only
 python manage.py test users.test_authentication
+
+# Test all API endpoints
+./test_all_endpoints.sh
+
+# Test with example Python client
+python example_client.py
 ```
+
+### Test Coverage
+The project includes comprehensive tests for:
+- ✅ Authentication flow (login, logout, refresh)
+- ✅ HTTP-only cookie handling
+- ✅ Token expiration and rotation
+- ✅ Role-based access control
+- ✅ Prediction creation and validation
+- ✅ Client rankings calculation
 
 ## Configuration
 
