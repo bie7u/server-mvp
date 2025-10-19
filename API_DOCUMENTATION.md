@@ -1,11 +1,22 @@
 # API Documentation
 
-This document describes all the API endpoints required for the FlowDesk SaaS application. All endpoints require authentication (except login) via Bearer token in the `Authorization` header.
+This document describes all the API endpoints required for the FlowDesk SaaS application. All endpoints require authentication (except login) via JWT tokens stored in HTTP-only cookies.
 
 ## Authentication
 
+### Overview
+
+The API uses JWT (JSON Web Token) authentication with HTTP-only cookies for enhanced security. This approach protects against XSS attacks by preventing JavaScript from accessing the tokens.
+
+**Key Features:**
+- Access tokens (short-lived: 15 minutes) - stored in `access_token` cookie
+- Refresh tokens (long-lived: 7 days) - stored in `refresh_token` cookie
+- HTTP-only cookies prevent XSS attacks
+- Automatic token rotation on refresh
+- Supports both cookie and Authorization header authentication
+
 ### POST /api/login
-Authenticate a user and receive a token.
+Authenticate a user and receive JWT tokens in HTTP-only cookies.
 
 **Request Body:**
 ```json
@@ -18,15 +29,21 @@ Authenticate a user and receive a token.
 **Response (200):**
 ```json
 {
-  "token": "jwt-token-here",
+  "message": "Login successful",
   "user": {
     "id": 1,
     "name": "John Doe",
     "email": "user@example.com",
-    "role": "root_admin"
+    "role": "root_admin",
+    "clientId": null,
+    "clientName": null
   }
 }
 ```
+
+**Cookies Set:**
+- `access_token`: JWT access token (HTTP-only, expires in 15 minutes)
+- `refresh_token`: JWT refresh token (HTTP-only, expires in 7 days)
 
 **Response (401):**
 ```json
@@ -34,6 +51,191 @@ Authenticate a user and receive a token.
   "message": "Invalid credentials"
 }
 ```
+
+**Response (400):**
+```json
+{
+  "message": "Email and password are required"
+}
+```
+
+---
+
+### POST /api/logout
+Logout user and clear authentication cookies.
+
+**Authentication Required:** Yes
+
+**Response (200):**
+```json
+{
+  "message": "Logout successful"
+}
+```
+
+**Notes:** This endpoint clears the `access_token` and `refresh_token` cookies.
+
+---
+
+### POST /api/refresh
+Refresh the access token using the refresh token from cookies.
+
+**Authentication Required:** No (uses refresh token from cookie)
+
+**Response (200):**
+```json
+{
+  "message": "Token refreshed successfully"
+}
+```
+
+**Cookies Updated:**
+- `access_token`: New JWT access token
+- `refresh_token`: New JWT refresh token (if rotation enabled)
+
+**Response (401):**
+```json
+{
+  "message": "Refresh token not found"
+}
+```
+
+or
+
+```json
+{
+  "message": "Invalid or expired refresh token"
+}
+```
+
+**Usage:** Call this endpoint when the access token expires (typically handled automatically by the frontend).
+
+---
+
+### GET /api/me
+Get current authenticated user information.
+
+**Authentication Required:** Yes
+
+**Response (200):**
+```json
+{
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "user@example.com",
+    "role": "client_admin",
+    "clientId": 1,
+    "clientName": "Acme Corporation"
+  }
+}
+```
+
+**Response (401):**
+```json
+{
+  "message": "Authentication required"
+}
+```
+
+---
+
+### Authentication Flow
+
+#### 1. Initial Login
+```javascript
+// Client sends login request
+POST /api/login
+{
+  "email": "user@example.com",
+  "password": "password"
+}
+
+// Server responds with user data and sets cookies
+Response: 200 OK
+Set-Cookie: access_token=<jwt>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900
+Set-Cookie: refresh_token=<jwt>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800
+{
+  "message": "Login successful",
+  "user": {...}
+}
+```
+
+#### 2. Authenticated Requests
+```javascript
+// Client makes requests - cookies are sent automatically
+GET /api/dashboard/stats
+Cookie: access_token=<jwt>
+
+// Server validates token from cookie and returns data
+Response: 200 OK
+{
+  "totalUsers": 1523,
+  ...
+}
+```
+
+#### 3. Token Refresh
+```javascript
+// When access token expires, client refreshes
+POST /api/refresh
+Cookie: refresh_token=<jwt>
+
+// Server issues new tokens
+Response: 200 OK
+Set-Cookie: access_token=<new_jwt>; ...
+Set-Cookie: refresh_token=<new_jwt>; ...
+{
+  "message": "Token refreshed successfully"
+}
+```
+
+#### 4. Logout
+```javascript
+// Client requests logout
+POST /api/logout
+Cookie: access_token=<jwt>
+
+// Server clears cookies
+Response: 200 OK
+Set-Cookie: access_token=; Max-Age=0
+Set-Cookie: refresh_token=; Max-Age=0
+{
+  "message": "Logout successful"
+}
+```
+
+---
+
+### Security Best Practices
+
+**HTTP-Only Cookies:**
+- Tokens are stored in HTTP-only cookies, preventing JavaScript access
+- Protects against XSS (Cross-Site Scripting) attacks
+
+**Secure Flag:**
+- Cookies use the Secure flag in production (HTTPS only)
+- Prevents man-in-the-middle attacks
+
+**SameSite Attribute:**
+- Set to 'Lax' to prevent CSRF attacks
+- Allows cookies to be sent with top-level navigation
+
+**Token Expiration:**
+- Access tokens expire in 15 minutes (short-lived)
+- Refresh tokens expire in 7 days (long-lived)
+- Automatic rotation prevents token reuse
+
+**Fallback Authentication:**
+- API also supports Bearer token in Authorization header
+- Use `Authorization: Bearer <token>` for non-browser clients
+
+**Example with Authorization Header:**
+```bash
+curl -H "Authorization: Bearer <access_token>" https://api.example.com/api/me
+```
+
+---
 
 **Roles:**
 - `root_admin`: Full access to all data and features
@@ -648,13 +850,15 @@ All endpoints may return the following error responses:
 
 ### Authentication Flow
 1. Client sends credentials to `/api/login`
-2. Server validates credentials and returns JWT token
-3. Client stores token in localStorage
-4. Client includes token in Authorization header for all subsequent requests
-5. Server validates token and extracts user info for filtering
+2. Server validates credentials and returns user data with HTTP-only cookies
+3. Client stores cookies automatically (browser handles this)
+4. Client includes cookies in all subsequent requests automatically
+5. Server validates token from cookie and extracts user info for filtering
+6. When access token expires, client calls `/api/refresh` to get new tokens
+7. Server validates refresh token and issues new access and refresh tokens
 
 ### Access Control Flow
-1. Extract user info from JWT token
+1. Extract user info from JWT token (from cookie or Authorization header)
 2. Check if user role has access to the endpoint
 3. Apply role-based filtering to queries
 4. Return filtered results
