@@ -143,63 +143,100 @@ Get current authenticated user information.
 ### Authentication Flow
 
 #### 1. Initial Login
-```javascript
-// Client sends login request
-POST /api/login
-{
-  "email": "user@example.com",
-  "password": "password"
-}
 
-// Server responds with user data and sets cookies
-Response: 200 OK
-Set-Cookie: access_token=<jwt>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900
-Set-Cookie: refresh_token=<jwt>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800
+**Using cURL:**
+```bash
+# Login and save cookies to file
+curl -X POST http://localhost:8000/api/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password123"}' \
+  -c cookies.txt \
+  -v
+```
+
+**Response:**
+```
+HTTP/1.1 200 OK
+Set-Cookie: access_token=<jwt>; HttpOnly; Path=/; SameSite=Lax; Max-Age=900
+Set-Cookie: refresh_token=<jwt>; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800
+Content-Type: application/json
+
 {
   "message": "Login successful",
-  "user": {...}
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "user@example.com",
+    "role": "client_admin",
+    "clientId": 1,
+    "clientName": "Acme Corp"
+  }
 }
 ```
 
 #### 2. Authenticated Requests
-```javascript
-// Client makes requests - cookies are sent automatically
-GET /api/dashboard/stats
-Cookie: access_token=<jwt>
 
-// Server validates token from cookie and returns data
-Response: 200 OK
-{
-  "totalUsers": 1523,
-  ...
-}
+**Using cURL with cookies:**
+```bash
+# Get current user info - cookies sent automatically from file
+curl http://localhost:8000/api/me/ \
+  -b cookies.txt
+
+# Get predictions (authenticated endpoint)
+curl http://localhost:8000/predictions/predictions/ \
+  -b cookies.txt
+```
+
+**Using Authorization Header (alternative):**
+```bash
+# Extract token from cookie file or login response
+ACCESS_TOKEN="<your_jwt_token>"
+
+# Make authenticated request
+curl http://localhost:8000/api/me/ \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
 #### 3. Token Refresh
-```javascript
-// When access token expires, client refreshes
-POST /api/refresh
-Cookie: refresh_token=<jwt>
 
-// Server issues new tokens
-Response: 200 OK
-Set-Cookie: access_token=<new_jwt>; ...
-Set-Cookie: refresh_token=<new_jwt>; ...
+**Using cURL:**
+```bash
+# Refresh access token using refresh token from cookies
+curl -X POST http://localhost:8000/api/refresh/ \
+  -b cookies.txt \
+  -c cookies.txt \
+  -v
+```
+
+**Response:**
+```
+HTTP/1.1 200 OK
+Set-Cookie: access_token=<new_jwt>; HttpOnly; Path=/; SameSite=Lax; Max-Age=900
+Set-Cookie: refresh_token=<new_jwt>; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800
+Content-Type: application/json
+
 {
   "message": "Token refreshed successfully"
 }
 ```
 
 #### 4. Logout
-```javascript
-// Client requests logout
-POST /api/logout
-Cookie: access_token=<jwt>
 
-// Server clears cookies
-Response: 200 OK
-Set-Cookie: access_token=; Max-Age=0
-Set-Cookie: refresh_token=; Max-Age=0
+**Using cURL:**
+```bash
+# Logout and clear cookies
+curl -X POST http://localhost:8000/api/logout/ \
+  -b cookies.txt \
+  -v
+```
+
+**Response:**
+```
+HTTP/1.1 200 OK
+Set-Cookie: access_token=; Max-Age=0; Path=/
+Set-Cookie: refresh_token=; Max-Age=0; Path=/
+Content-Type: application/json
+
 {
   "message": "Logout successful"
 }
@@ -244,413 +281,555 @@ curl -H "Authorization: Bearer <access_token>" https://api.example.com/api/me
 
 ---
 
-## Dashboard
+## Administration
 
-### GET /api/dashboard/stats
-Get dashboard statistics.
+### GET /admin-panel/clients/
+Get list of all client organizations.
 
-**Authentication Required:** Yes
-
-**Response (200):**
-```json
-{
-  "totalUsers": 1523,
-  "activeClients": 45,
-  "revenue": 125430,
-  "growth": 12.5
-}
-```
-
-**Access Control:**
-- `root_admin`: Global statistics across all clients
-- `client_admin`: Statistics for their client organization
-- `client_user`: Statistics for their client organization
-
----
-
-## Analytics
-
-### GET /api/analytics
-Get analytics data for charts and visualization.
-
-**Authentication Required:** Yes
-
-**Query Parameters:**
-- `clientId` (optional): Filter analytics by client ID (only for root_admin)
-- `startDate` (optional): Start date for analytics range (ISO 8601)
-- `endDate` (optional): End date for analytics range (ISO 8601)
+**Authentication Required:** Yes (Admin only)
 
 **Response (200):**
 ```json
-{
-  "data": [
-    { "name": "Jan", "users": 400, "revenue": 2400 },
-    { "name": "Feb", "users": 300, "revenue": 1398 },
-    { "name": "Mar", "users": 600, "revenue": 9800 }
-  ]
-}
-```
-
-**Server-Side Filtering:**
-- Filters data based on user role and client assignment
-- `root_admin` can view all data or filter by specific client
-- `client_admin` and `client_user` see only their client's data
-
----
-
-## Users
-
-### GET /api/users
-Get list of users with server-side filtering.
-
-**Authentication Required:** Yes
-
-**Query Parameters:**
-- `clientId` (optional): Filter by client ID
-- `role` (optional): Filter by role (`root_admin`, `client_admin`, `client_user`)
-- `status` (optional): Filter by status (`active`, `inactive`)
-- `search` (optional): Search by name or email
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 10, max: 100)
-
-**Response (200):**
-```json
-{
-  "users": [
-    {
-      "id": 1,
-      "name": "Alice Root",
-      "email": "root@flowdesk.com",
-      "role": "root_admin",
-      "status": "active",
-      "clientId": null,
-      "clientName": null
-    },
-    {
-      "id": 2,
-      "name": "Bob Admin",
-      "email": "admin@client.com",
-      "role": "client_admin",
-      "status": "active",
-      "clientId": 1,
-      "clientName": "Acme Corporation"
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 50,
-    "totalPages": 5
+[
+  {
+    "id": 1,
+    "name": "Acme Corporation",
+    "admin_name": "Bob Admin",
+    "admin_email": "admin@client.com",
+    "created_at": "2025-10-19T10:30:00Z",
+    "updated_at": "2025-10-19T10:30:00Z"
   }
-}
+]
 ```
 
-**Server-Side Filtering:**
-- `root_admin`: Can see all users and filter by any parameter
-- `client_admin`: Can only see users from their client
-- `client_user`: Cannot access this endpoint
-
 **Access Control:**
-- Allowed roles: `root_admin`, `client_admin`
+- Allowed roles: Admin users only (`is_staff=True`)
 
 ---
 
-### PATCH /api/users/:userId/client
-Update a user's client assignment.
+### POST /admin-panel/clients/
+Create a new client organization with a root admin user.
 
-**Authentication Required:** Yes
-
-**URL Parameters:**
-- `userId`: User ID to update
+**Authentication Required:** Yes (Admin only)
 
 **Request Body:**
 ```json
 {
-  "clientId": 1
+  "name": "New Corp",
+  "admin_name": "Jane Doe",
+  "admin_email": "jane@newcorp.com",
+  "client_root_admin_username": "jane_admin",
+  "password": "securepassword"
 }
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
-  "message": "User client updated successfully",
-  "userId": 2,
-  "clientId": 1
+  "id": 3,
+  "name": "New Corp",
+  "admin_name": "Jane Doe",
+  "admin_email": "jane@newcorp.com",
+  "created_at": "2025-10-19T14:30:00Z",
+  "updated_at": "2025-10-19T14:30:00Z"
 }
 ```
 
+**Notes:**
+- Automatically creates a Django user with the specified username and password
+- Creates a ClientUserM entry linking the user to the client with `client_admin` role
+- Sets `is_root_client_admin=True` for the admin user
+
 **Access Control:**
-- Allowed roles: `root_admin`
+- Allowed roles: Admin users only
 
 ---
 
-### DELETE /api/users/:userId
-Delete a user.
-
-**Authentication Required:** Yes
-
-**URL Parameters:**
-- `userId`: User ID to delete
-
-**Response (200):**
-```json
-{
-  "message": "User deleted successfully",
-  "userId": 2
-}
-```
-
-**Access Control:**
-- Allowed roles: `root_admin`, `client_admin` (can only delete users from their client)
-
----
-
-## Clients
-
-### GET /api/clients
-Get list of all client organizations.
-
-**Authentication Required:** Yes
-
-**Query Parameters:**
-- `status` (optional): Filter by status (`active`, `inactive`)
-- `search` (optional): Search by client name or admin email
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 10, max: 100)
-
-**Response (200):**
-```json
-{
-  "clients": [
-    {
-      "id": 1,
-      "name": "Acme Corporation",
-      "adminName": "Bob Admin",
-      "adminEmail": "admin@client.com",
-      "status": "active"
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 45,
-    "totalPages": 5
-  }
-}
-```
-
-**Server-Side Filtering:**
-- Filters based on query parameters
-- Pagination applied server-side
-
-**Access Control:**
-- Allowed roles: `root_admin`
-
----
-
-### GET /api/clients/:clientId
+### GET /admin-panel/clients/{id}/
 Get a specific client by ID.
 
-**Authentication Required:** Yes
+**Authentication Required:** Yes (Admin only)
 
 **URL Parameters:**
-- `clientId`: Client ID
+- `id`: Client ID
 
 **Response (200):**
 ```json
 {
-  "client": {
-    "id": 1,
-    "name": "Acme Corporation",
-    "adminName": "Bob Admin",
-    "adminEmail": "admin@client.com",
-    "status": "active"
-  }
+  "id": 1,
+  "name": "Acme Corporation",
+  "admin_name": "Bob Admin",
+  "admin_email": "admin@client.com",
+  "created_at": "2025-10-19T10:30:00Z",
+  "updated_at": "2025-10-19T10:30:00Z"
 }
 ```
 
 **Response (404):**
 ```json
 {
-  "message": "Client not found"
+  "detail": "Not found."
 }
 ```
 
 **Access Control:**
-- `root_admin`: Can access any client
-- `client_admin`: Can only access their own client
+- Allowed roles: Admin users only
 
 ---
 
-### GET /api/clients/:clientId/users
-Get all users belonging to a specific client.
+### PUT/PATCH /admin-panel/clients/{id}/
+Update a client organization.
 
-**Authentication Required:** Yes
+**Authentication Required:** Yes (Admin only)
 
 **URL Parameters:**
-- `clientId`: Client ID
+- `id`: Client ID
 
-**Query Parameters:**
-- `role` (optional): Filter by role
-- `status` (optional): Filter by status
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 10, max: 100)
+**Request Body (PUT - all fields required):**
+```json
+{
+  "name": "Updated Corp Name",
+  "admin_name": "Jane Doe",
+  "admin_email": "jane@updated.com"
+}
+```
+
+**Request Body (PATCH - partial update):**
+```json
+{
+  "name": "Updated Corp Name"
+}
+```
 
 **Response (200):**
 ```json
 {
-  "users": [
-    {
-      "id": 2,
-      "name": "Bob Admin",
-      "email": "admin@client.com",
-      "role": "client_admin",
-      "status": "active",
-      "clientId": 1,
-      "clientName": "Acme Corporation"
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 3,
-    "totalPages": 1
-  }
+  "id": 1,
+  "name": "Updated Corp Name",
+  "admin_name": "Bob Admin",
+  "admin_email": "admin@client.com",
+  "created_at": "2025-10-19T10:30:00Z",
+  "updated_at": "2025-10-19T14:45:00Z"
 }
 ```
 
-**Server-Side Filtering:**
-- Filters users by client ID and optional query parameters
-- Pagination applied server-side
-
 **Access Control:**
-- `root_admin`: Can access users from any client
-- `client_admin`: Can only access users from their client
+- Allowed roles: Admin users only
 
 ---
 
-### POST /api/clients
-Create a new client organization.
+### GET /admin-panel/clients/{client_pk}/client-users/
+Get all users belonging to a specific client.
 
-**Authentication Required:** Yes
+**Authentication Required:** Yes (Admin only)
+
+**URL Parameters:**
+- `client_pk`: Client ID
+
+**Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "role": "client_admin",
+    "client": 1,
+    "created_at": "2025-10-19T10:30:00Z",
+    "updated_at": "2025-10-19T10:30:00Z",
+    "user_read": {
+      "id": 2,
+      "username": "bob_admin",
+      "email": "bob@client.com",
+      "first_name": "Bob",
+      "last_name": "Admin",
+      "is_staff": false,
+      "is_active": true
+    }
+  }
+]
+```
+
+**Access Control:**
+- Allowed roles: Admin users only
+
+---
+
+### POST /admin-panel/clients/{client_pk}/client-users/
+Create a new user for a specific client.
+
+**Authentication Required:** Yes (Admin only)
+
+**URL Parameters:**
+- `client_pk`: Client ID
 
 **Request Body:**
 ```json
 {
-  "clientName": "New Corp",
-  "adminName": "Jane Doe",
-  "adminEmail": "jane@newcorp.com",
-  "adminPassword": "securepassword"
+  "role": "client_user",
+  "username": "john_user",
+  "password": "securepassword"
+}
+```
+
+**Response (201):**
+```json
+{
+  "id": 5,
+  "role": "client_user",
+  "client": 1,
+  "created_at": "2025-10-19T14:50:00Z",
+  "updated_at": "2025-10-19T14:50:00Z",
+  "user_read": {
+    "id": 6,
+    "username": "john_user",
+    "email": "",
+    "first_name": "",
+    "last_name": "",
+    "is_staff": false,
+    "is_active": true
+  }
+}
+```
+
+**Notes:**
+- Automatically creates a Django user with the specified username and password
+- Links the user to the specified client
+- Role must be either `client_admin` or `client_user`
+
+**Validation:**
+- Username must be unique
+- Password is required for user creation
+
+**Access Control:**
+- Allowed roles: Admin users only
+
+---
+
+### GET /admin-panel/clients/{client_pk}/client-users/{id}/
+Get a specific client user.
+
+**Authentication Required:** Yes (Admin only)
+
+**URL Parameters:**
+- `client_pk`: Client ID
+- `id`: ClientUserM ID
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "role": "client_admin",
+  "client": 1,
+  "created_at": "2025-10-19T10:30:00Z",
+  "updated_at": "2025-10-19T10:30:00Z",
+  "user_read": {
+    "id": 2,
+    "username": "bob_admin",
+    "email": "bob@client.com",
+    "first_name": "Bob",
+    "last_name": "Admin",
+    "is_staff": false,
+    "is_active": true
+  }
+}
+```
+
+**Access Control:**
+- Allowed roles: Admin users only
+
+---
+
+### PUT/PATCH /admin-panel/clients/{client_pk}/client-users/{id}/
+Update a client user.
+
+**Authentication Required:** Yes (Admin only)
+
+**URL Parameters:**
+- `client_pk`: Client ID
+- `id`: ClientUserM ID
+
+**Request Body (PATCH - partial update):**
+```json
+{
+  "role": "client_admin"
 }
 ```
 
 **Response (200):**
 ```json
 {
-  "client": {
-    "id": 3,
-    "name": "New Corp",
-    "adminName": "Jane Doe",
-    "adminEmail": "jane@newcorp.com",
-    "status": "active"
-  },
-  "message": "Client created successfully"
+  "id": 1,
+  "role": "client_admin",
+  "client": 1,
+  "created_at": "2025-10-19T10:30:00Z",
+  "updated_at": "2025-10-19T14:55:00Z",
+  "user_read": {
+    "id": 2,
+    "username": "bob_admin",
+    "email": "bob@client.com",
+    "first_name": "Bob",
+    "last_name": "Admin",
+    "is_staff": false,
+    "is_active": true
+  }
 }
 ```
 
 **Access Control:**
-- Allowed roles: `root_admin`
+- Allowed roles: Admin users only
+
+---
+
+## Leagues
+
+### GET /leagues/standings/
+Get league standings (table/classification).
+
+**Authentication Required:** No (publicly accessible)
+
+**Query Parameters:**
+- `league` (optional): Filter by league ID
+- `season` (optional): Filter by season ID
+
+**Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "league": 1,
+    "league_name": "Premier League",
+    "season": 1,
+    "season_name": "2024/2025",
+    "entries": [
+      {
+        "id": 1,
+        "team": 1,
+        "team_name": "Manchester City",
+        "position": 1,
+        "played_games": 10,
+        "won": 8,
+        "draw": 1,
+        "lost": 1,
+        "points": 25,
+        "goals_for": 28,
+        "goals_against": 8,
+        "goal_difference": 20
+      }
+    ]
+  }
+]
+```
+
+**Notes:**
+- Returns standings ordered by position
+- Filterable by league and season
+- No pagination (returns all standings)
+
+---
+
+### GET /leagues/standings/{id}/
+Get a specific standing by ID.
+
+**Authentication Required:** No
+
+**URL Parameters:**
+- `id`: Standing ID
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "league": 1,
+  "league_name": "Premier League",
+  "season": 1,
+  "season_name": "2024/2025",
+  "entries": [
+    {
+      "id": 1,
+      "team": 1,
+      "team_name": "Manchester City",
+      "position": 1,
+      "played_games": 10,
+      "won": 8,
+      "draw": 1,
+      "lost": 1,
+      "points": 25,
+      "goals_for": 28,
+      "goals_against": 8,
+      "goal_difference": 20
+    }
+  ]
+}
+```
+
+---
+
+### GET /leagues/rounds/
+Get league rounds (matchweeks/game weeks).
+
+**Authentication Required:** No
+
+**Query Parameters:**
+- `league` (optional): Filter by league ID
+- `season` (optional): Filter by season ID
+
+**Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "league": 1,
+    "league_name": "Premier League",
+    "season": 1,
+    "season_name": "2024/2025",
+    "round_number": 10,
+    "name": "Round 10",
+    "start_date": "2025-10-18T12:00:00Z",
+    "end_date": "2025-10-20T20:00:00Z",
+    "matches": [
+      {
+        "id": 1,
+        "home_team": 1,
+        "home_team_name": "Manchester City",
+        "away_team": 2,
+        "away_team_name": "Arsenal",
+        "home_score": null,
+        "away_score": null,
+        "status": "SCHEDULED",
+        "date": "2025-10-19T15:00:00Z",
+        "league": 1,
+        "league_name": "Premier League"
+      }
+    ]
+  }
+]
+```
+
+**Notes:**
+- Returns rounds ordered by round_number
+- Includes all matches in each round
+- No pagination
+
+---
+
+### GET /leagues/rounds/{id}/
+Get a specific round by ID.
+
+**Authentication Required:** No
+
+**URL Parameters:**
+- `id`: Round ID
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "league": 1,
+  "league_name": "Premier League",
+  "season": 1,
+  "season_name": "2024/2025",
+  "round_number": 10,
+  "name": "Round 10",
+  "start_date": "2025-10-18T12:00:00Z",
+  "end_date": "2025-10-20T20:00:00Z",
+  "matches": [
+    {
+      "id": 1,
+      "home_team": 1,
+      "home_team_name": "Manchester City",
+      "away_team": 2,
+      "away_team_name": "Arsenal",
+      "home_score": null,
+      "away_score": null,
+      "status": "SCHEDULED",
+      "date": "2025-10-19T15:00:00Z",
+      "league": 1,
+      "league_name": "Premier League"
+    }
+  ]
+}
+```
+
+---
+
+### GET /leagues/upcoming-matches/
+Get upcoming matches in the next 7 days.
+
+**Authentication Required:** No
+
+**Query Parameters:**
+- `league` (optional): Filter by league ID
+
+**Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "home_team": 1,
+    "home_team_name": "Manchester City",
+    "away_team": 2,
+    "away_team_name": "Arsenal",
+    "home_score": null,
+    "away_score": null,
+    "status": "SCHEDULED",
+    "date": "2025-10-19T15:00:00Z",
+    "league": 1,
+    "league_name": "Premier League"
+  }
+]
+```
+
+**Notes:**
+- Returns matches with date between now and 7 days from now
+- Ordered by date (ascending)
+- No pagination (returns all upcoming matches)
+- Filterable by league
+
+**Match Status Values:**
+- `SCHEDULED`: Match is scheduled
+- `TIMED`: Match has a specific time set
+- `IN_PLAY`: Match is currently being played
+- `PAUSED`: Match is paused (halftime, etc.)
+- `FINISHED`: Match is finished
+- `SUSPENDED`: Match is suspended
+- `POSTPONED`: Match is postponed
+- `CANCELLED`: Match is cancelled
 
 ---
 
 ## Predictions
 
-### GET /api/predictions/matches
-Get upcoming matches available for predictions.
+### GET /predictions/predictions/
+Get predictions (current user's predictions or all if admin).
 
 **Authentication Required:** Yes
 
-**Query Parameters:**
-- `league` (optional): Filter by league name
-- `date` (optional): Filter matches by date (ISO 8601)
-- `locked` (optional): Filter by locked status (true/false)
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 10, max: 100)
-
 **Response (200):**
 ```json
-{
-  "matches": [
-    {
-      "id": 1,
-      "homeTeam": "Manchester City",
-      "awayTeam": "Arsenal",
-      "date": "2025-10-13",
-      "time": "15:00",
-      "league": "Premier League",
-      "locked": false
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 8,
-    "totalPages": 1
+[
+  {
+    "id": 1,
+    "user": 2,
+    "match": 1,
+    "predicted_home_score": 2,
+    "predicted_away_score": 1,
+    "created_at": "2025-10-18T14:30:00Z",
+    "points_awarded": null,
+    "status": "pending"
   }
-}
+]
 ```
 
 **Server-Side Filtering:**
-- Filters matches based on query parameters
-- Pagination applied server-side
-- Only returns upcoming matches (not past matches)
+- Regular users see only their own predictions
+- Admin users (`is_staff=True`) see all predictions
+
+**Notes:**
+- No pagination
+- Status values: `pending`, `correct_result`, `correct_winner`, `incorrect`, `late`
 
 ---
 
-### GET /api/predictions/user
-Get the current user's predictions.
-
-**Authentication Required:** Yes
-
-**Query Parameters:**
-- `matchId` (optional): Filter by match ID
-- `status` (optional): Filter by match status (`upcoming`, `locked`, `completed`)
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 10, max: 100)
-
-**Response (200):**
-```json
-{
-  "predictions": [
-    {
-      "id": 1,
-      "userId": 2,
-      "userName": "Bob Admin",
-      "email": "admin@client.com",
-      "clientId": 1,
-      "matchId": 1,
-      "homeScore": 2,
-      "awayScore": 1
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 5,
-    "totalPages": 1
-  }
-}
-```
-
-**Server-Side Filtering:**
-- Returns only predictions for the authenticated user
-- Filters based on user's authentication token
-- Optional filtering by match ID or status
-- Pagination applied server-side
-
----
-
-### POST /api/predictions
+### POST /predictions/predictions/
 Create a new prediction for a match.
 
 **Authentication Required:** Yes
@@ -658,129 +837,166 @@ Create a new prediction for a match.
 **Request Body:**
 ```json
 {
-  "matchId": 1,
-  "homeScore": 2,
-  "awayScore": 1
+  "match": 1,
+  "predicted_home_score": 2,
+  "predicted_away_score": 1
 }
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
-  "prediction": {
-    "id": 8,
-    "userId": 3,
-    "userName": "Charlie User",
-    "email": "user@client.com",
-    "clientId": 1,
-    "matchId": 1,
-    "homeScore": 2,
-    "awayScore": 1
-  },
-  "message": "Prediction created successfully"
+  "id": 8,
+  "user": 3,
+  "match": 1,
+  "predicted_home_score": 2,
+  "predicted_away_score": 1,
+  "created_at": "2025-10-19T14:30:00Z",
+  "points_awarded": null,
+  "status": "pending"
 }
 ```
 
 **Validation:**
-- Match must exist and not be locked
-- User can only have one prediction per match
+- Match must exist and have status `SCHEDULED` or `TIMED`
+- Match must not have started yet (date must be in the future)
+- User can only have one prediction per match (enforced by database constraint)
 - Scores must be non-negative integers
+
+**Response (400) - Validation Error:**
+```json
+{
+  "match": ["You can only predict matches with status SCHEDULED or TIMED."]
+}
+```
+
+or
+
+```json
+{
+  "non_field_errors": ["You have already predicted this match."]
+}
+```
 
 ---
 
-### PUT /api/predictions/:predictionId
+### GET /predictions/predictions/{id}/
+Get a specific prediction by ID.
+
+**Authentication Required:** Yes
+
+**URL Parameters:**
+- `id`: Prediction ID
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "user": 2,
+  "match": 1,
+  "predicted_home_score": 2,
+  "predicted_away_score": 1,
+  "created_at": "2025-10-18T14:30:00Z",
+  "points_awarded": null,
+  "status": "pending"
+}
+```
+
+**Access Control:**
+- Users can only see their own predictions
+- Admin users can see any prediction
+
+---
+
+### PUT/PATCH /predictions/predictions/{id}/
 Update an existing prediction.
 
 **Authentication Required:** Yes
 
 **URL Parameters:**
-- `predictionId`: Prediction ID to update
+- `id`: Prediction ID
 
-**Request Body:**
+**Request Body (PATCH):**
 ```json
 {
-  "homeScore": 3,
-  "awayScore": 1
+  "predicted_home_score": 3,
+  "predicted_away_score": 1
 }
 ```
 
 **Response (200):**
 ```json
 {
-  "prediction": {
-    "id": 1,
-    "userId": 3,
-    "userName": "Charlie User",
-    "email": "user@client.com",
-    "clientId": 1,
-    "matchId": 1,
-    "homeScore": 3,
-    "awayScore": 1
-  },
-  "message": "Prediction updated successfully"
-}
-```
-
-**Response (404):**
-```json
-{
-  "message": "Prediction not found"
+  "id": 1,
+  "user": 2,
+  "match": 1,
+  "predicted_home_score": 3,
+  "predicted_away_score": 1,
+  "created_at": "2025-10-18T14:30:00Z",
+  "points_awarded": null,
+  "status": "pending"
 }
 ```
 
 **Validation:**
-- User can only update their own predictions
-- Match must not be locked
-- Scores must be non-negative integers
+- Same validation rules as POST (match must not have started, etc.)
+- Users can only update their own predictions
+
+**Access Control:**
+- Users can only update their own predictions
+- Admin users can update any prediction
 
 ---
 
-## Rankings
-
-### GET /api/rankings
-Get prediction rankings for a client.
+### DELETE /predictions/predictions/{id}/
+Delete a prediction.
 
 **Authentication Required:** Yes
 
-**Query Parameters:**
-- `clientId` (optional): Filter by client ID (only for root_admin)
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 10, max: 100)
+**URL Parameters:**
+- `id`: Prediction ID
+
+**Response (204):**
+No content
+
+**Access Control:**
+- Users can only delete their own predictions
+- Admin users can delete any prediction
+
+---
+
+### GET /predictions/client-rankings/
+Get prediction rankings for the current user's client.
+
+**Authentication Required:** Yes
 
 **Response (200):**
 ```json
-{
-  "rankings": [
-    {
-      "position": 1,
-      "userId": 2,
-      "userName": "Bob Admin",
-      "email": "admin@client.com",
-      "points": 15,
-      "correctResults": 3,
-      "correctWinners": 6,
-      "totalPredictions": 7
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 3,
-    "totalPages": 1
+[
+  {
+    "user": 2,
+    "username": "bob_admin",
+    "points": 15,
+    "position": 1
+  },
+  {
+    "user": 3,
+    "username": "john_user",
+    "points": 12,
+    "position": 2
   }
-}
+]
 ```
 
 **Server-Side Filtering:**
-- `root_admin`: Can view rankings for any client by specifying clientId
-- `client_admin` and `client_user`: Automatically filtered to their client
-- Rankings calculated based on prediction points
-- Sorting: Primary by points (desc), secondary by correct results (desc)
+- Returns rankings for the authenticated user's client
+- If user is not associated with a client, returns empty list
+- Ordered by position (ascending)
 
-**Ranking Points System:**
-- Exact score prediction: 3 points
-- Correct winner prediction: 1 point
-- Incorrect prediction: 0 points
+**Notes:**
+- No pagination
+- Rankings are calculated based on prediction accuracy
+- Points are awarded based on prediction results
 
 ---
 
@@ -831,170 +1047,632 @@ All endpoints may return the following error responses:
 
 ---
 
-## Server-Side Filtering Best Practices
+## Client Integration Examples
 
-1. **Always filter by user role and client assignment** to ensure data isolation
-2. **Use query parameters** for optional filtering (status, search, date ranges)
-3. **Implement pagination** for all list endpoints to improve performance
-4. **Validate all inputs** on the server side
-5. **Apply access control** before any data filtering or retrieval
-6. **Index database fields** used in filtering for better performance
-7. **Sanitize search inputs** to prevent SQL injection or NoSQL injection
-8. **Use case-insensitive search** for better user experience
-9. **Return consistent response formats** with pagination metadata
-10. **Log all filtering operations** for audit and debugging purposes
+### JavaScript/TypeScript Frontend
+
+#### Using Fetch API
+
+```javascript
+// api.js - API client module
+const API_BASE_URL = 'http://localhost:8000';
+
+class ApiClient {
+  /**
+   * Login user and store cookies
+   */
+  async login(email, password) {
+    const response = await fetch(`${API_BASE_URL}/api/login/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      credentials: 'include' // Important: include cookies
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Login failed');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Get current user info
+   */
+  async getCurrentUser() {
+    const response = await fetch(`${API_BASE_URL}/api/me/`, {
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to get user info');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Refresh access token
+   */
+  async refreshToken() {
+    const response = await fetch(`${API_BASE_URL}/api/refresh/`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to refresh token');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Logout user
+   */
+  async logout() {
+    const response = await fetch(`${API_BASE_URL}/api/logout/`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    
+    return response.ok;
+  }
+  
+  /**
+   * Get upcoming matches
+   */
+  async getUpcomingMatches(leagueId = null) {
+    const url = new URL(`${API_BASE_URL}/leagues/upcoming-matches/`);
+    if (leagueId) {
+      url.searchParams.append('league', leagueId);
+    }
+    
+    const response = await fetch(url, {
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to get matches');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Create a prediction
+   */
+  async createPrediction(matchId, predictedHomeScore, predictedAwayScore) {
+    const response = await fetch(`${API_BASE_URL}/predictions/predictions/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        match: matchId,
+        predicted_home_score: predictedHomeScore,
+        predicted_away_score: predictedAwayScore
+      }),
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to create prediction');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Get user's predictions
+   */
+  async getMyPredictions() {
+    const response = await fetch(`${API_BASE_URL}/predictions/predictions/`, {
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to get predictions');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Get client rankings
+   */
+  async getClientRankings() {
+    const response = await fetch(`${API_BASE_URL}/predictions/client-rankings/`, {
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to get rankings');
+    }
+    
+    return response.json();
+  }
+  
+  /**
+   * Get league standings
+   */
+  async getStandings(leagueId = null, seasonId = null) {
+    const url = new URL(`${API_BASE_URL}/leagues/standings/`);
+    if (leagueId) url.searchParams.append('league', leagueId);
+    if (seasonId) url.searchParams.append('season', seasonId);
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error('Failed to get standings');
+    }
+    
+    return response.json();
+  }
+}
+
+// Export singleton instance
+export const api = new ApiClient();
+```
+
+#### Usage in React Component
+
+```jsx
+import React, { useState, useEffect } from 'react';
+import { api } from './api';
+
+function LoginPage() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(null);
+  
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError(null);
+    
+    try {
+      const data = await api.login(email, password);
+      console.log('Logged in:', data.user);
+      // Redirect to dashboard or update app state
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  
+  return (
+    <form onSubmit={handleLogin}>
+      <input 
+        type="email" 
+        value={email} 
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <input 
+        type="password" 
+        value={password} 
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+      />
+      <button type="submit">Login</button>
+      {error && <div className="error">{error}</div>}
+    </form>
+  );
+}
+
+function PredictionsPage() {
+  const [matches, setMatches] = useState([]);
+  const [predictions, setPredictions] = useState([]);
+  
+  useEffect(() => {
+    loadData();
+  }, []);
+  
+  const loadData = async () => {
+    try {
+      const [matchesData, predictionsData] = await Promise.all([
+        api.getUpcomingMatches(),
+        api.getMyPredictions()
+      ]);
+      setMatches(matchesData);
+      setPredictions(predictionsData);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+    }
+  };
+  
+  const handlePredict = async (matchId, homeScore, awayScore) => {
+    try {
+      await api.createPrediction(matchId, homeScore, awayScore);
+      loadData(); // Reload data
+    } catch (err) {
+      alert('Failed to create prediction: ' + err.message);
+    }
+  };
+  
+  return (
+    <div>
+      <h1>Make Your Predictions</h1>
+      {/* Render matches and prediction form */}
+    </div>
+  );
+}
+```
+
+### Python Client
+
+```python
+import requests
+from typing import Optional, Dict, Any, List
+
+class APIClient:
+    """Python client for the prediction API with HTTP-only cookie authentication."""
+    
+    def __init__(self, base_url: str = "http://localhost:8000"):
+        self.base_url = base_url
+        self.session = requests.Session()
+    
+    def login(self, email: str, password: str) -> Dict[str, Any]:
+        """Login and store cookies in session."""
+        response = self.session.post(
+            f"{self.base_url}/api/login/",
+            json={"email": email, "password": password}
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def logout(self) -> bool:
+        """Logout and clear cookies."""
+        response = self.session.post(f"{self.base_url}/api/logout/")
+        return response.status_code == 200
+    
+    def refresh_token(self) -> Dict[str, Any]:
+        """Refresh the access token."""
+        response = self.session.post(f"{self.base_url}/api/refresh/")
+        response.raise_for_status()
+        return response.json()
+    
+    def get_current_user(self) -> Dict[str, Any]:
+        """Get current user information."""
+        response = self.session.get(f"{self.base_url}/api/me/")
+        response.raise_for_status()
+        return response.json()
+    
+    def get_upcoming_matches(self, league_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get upcoming matches."""
+        params = {"league": league_id} if league_id else {}
+        response = self.session.get(
+            f"{self.base_url}/leagues/upcoming-matches/",
+            params=params
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def create_prediction(
+        self, 
+        match_id: int, 
+        predicted_home_score: int, 
+        predicted_away_score: int
+    ) -> Dict[str, Any]:
+        """Create a new prediction."""
+        response = self.session.post(
+            f"{self.base_url}/predictions/predictions/",
+            json={
+                "match": match_id,
+                "predicted_home_score": predicted_home_score,
+                "predicted_away_score": predicted_away_score
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def get_my_predictions(self) -> List[Dict[str, Any]]:
+        """Get current user's predictions."""
+        response = self.session.get(f"{self.base_url}/predictions/predictions/")
+        response.raise_for_status()
+        return response.json()
+    
+    def update_prediction(
+        self,
+        prediction_id: int,
+        predicted_home_score: int,
+        predicted_away_score: int
+    ) -> Dict[str, Any]:
+        """Update an existing prediction."""
+        response = self.session.patch(
+            f"{self.base_url}/predictions/predictions/{prediction_id}/",
+            json={
+                "predicted_home_score": predicted_home_score,
+                "predicted_away_score": predicted_away_score
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def delete_prediction(self, prediction_id: int) -> bool:
+        """Delete a prediction."""
+        response = self.session.delete(
+            f"{self.base_url}/predictions/predictions/{prediction_id}/"
+        )
+        return response.status_code == 204
+    
+    def get_client_rankings(self) -> List[Dict[str, Any]]:
+        """Get rankings for current user's client."""
+        response = self.session.get(f"{self.base_url}/predictions/client-rankings/")
+        response.raise_for_status()
+        return response.json()
+    
+    def get_standings(
+        self, 
+        league_id: Optional[int] = None,
+        season_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get league standings."""
+        params = {}
+        if league_id:
+            params["league"] = league_id
+        if season_id:
+            params["season"] = season_id
+        
+        response = self.session.get(
+            f"{self.base_url}/leagues/standings/",
+            params=params
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    # Admin endpoints (require admin authentication)
+    
+    def create_client(
+        self,
+        name: str,
+        admin_name: str,
+        admin_email: str,
+        username: str,
+        password: str
+    ) -> Dict[str, Any]:
+        """Create a new client (admin only)."""
+        response = self.session.post(
+            f"{self.base_url}/admin-panel/clients/",
+            json={
+                "name": name,
+                "admin_name": admin_name,
+                "admin_email": admin_email,
+                "client_root_admin_username": username,
+                "password": password
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def get_clients(self) -> List[Dict[str, Any]]:
+        """Get all clients (admin only)."""
+        response = self.session.get(f"{self.base_url}/admin-panel/clients/")
+        response.raise_for_status()
+        return response.json()
+    
+    def create_client_user(
+        self,
+        client_id: int,
+        username: str,
+        password: str,
+        role: str = "client_user"
+    ) -> Dict[str, Any]:
+        """Create a new user for a client (admin only)."""
+        response = self.session.post(
+            f"{self.base_url}/admin-panel/clients/{client_id}/client-users/",
+            json={
+                "username": username,
+                "password": password,
+                "role": role
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+# Usage example
+if __name__ == "__main__":
+    client = APIClient()
+    
+    # Login
+    user_data = client.login("user@example.com", "password123")
+    print(f"Logged in as: {user_data['user']['name']}")
+    
+    # Get upcoming matches
+    matches = client.get_upcoming_matches()
+    print(f"Found {len(matches)} upcoming matches")
+    
+    # Create a prediction
+    if matches:
+        prediction = client.create_prediction(
+            match_id=matches[0]['id'],
+            predicted_home_score=2,
+            predicted_away_score=1
+        )
+        print(f"Created prediction: {prediction}")
+    
+    # Get rankings
+    rankings = client.get_client_rankings()
+    print(f"Rankings: {rankings}")
+    
+    # Logout
+    client.logout()
+    print("Logged out")
+```
+
+### cURL Examples for Testing
+
+```bash
+#!/bin/bash
+# Complete API testing script
+
+BASE_URL="http://localhost:8000"
+COOKIES_FILE="cookies.txt"
+
+echo "=== 1. Login ==="
+curl -X POST "$BASE_URL/api/login/" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password123"}' \
+  -c "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 2. Get Current User ==="
+curl "$BASE_URL/api/me/" \
+  -b "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 3. Get Upcoming Matches ==="
+curl "$BASE_URL/leagues/upcoming-matches/" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 4. Get League Standings ==="
+curl "$BASE_URL/leagues/standings/" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 5. Create Prediction ==="
+curl -X POST "$BASE_URL/predictions/predictions/" \
+  -H "Content-Type: application/json" \
+  -d '{"match":1,"predicted_home_score":2,"predicted_away_score":1}' \
+  -b "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 6. Get My Predictions ==="
+curl "$BASE_URL/predictions/predictions/" \
+  -b "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 7. Get Client Rankings ==="
+curl "$BASE_URL/predictions/client-rankings/" \
+  -b "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 8. Refresh Token ==="
+curl -X POST "$BASE_URL/api/refresh/" \
+  -b "$COOKIES_FILE" \
+  -c "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 9. Logout ==="
+curl -X POST "$BASE_URL/api/logout/" \
+  -b "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+echo "=== 10. Try Accessing After Logout (should fail) ==="
+curl "$BASE_URL/api/me/" \
+  -b "$COOKIES_FILE" \
+  -w "\nHTTP Status: %{http_code}\n\n"
+
+# Clean up
+rm -f "$COOKIES_FILE"
+```
 
 ---
 
 ## Implementation Notes
 
 ### Authentication Flow
-1. Client sends credentials to `/api/login`
+1. Client sends credentials to `/api/login/`
 2. Server validates credentials and returns user data with HTTP-only cookies
 3. Client stores cookies automatically (browser handles this)
 4. Client includes cookies in all subsequent requests automatically
-5. Server validates token from cookie and extracts user info for filtering
-6. When access token expires, client calls `/api/refresh` to get new tokens
+5. Server validates token from cookie and extracts user info
+6. When access token expires, client calls `/api/refresh/` to get new tokens
 7. Server validates refresh token and issues new access and refresh tokens
 
-### Access Control Flow
-1. Extract user info from JWT token (from cookie or Authorization header)
-2. Check if user role has access to the endpoint
-3. Apply role-based filtering to queries
-4. Return filtered results
-
-### Server-Side Filtering Implementation
-```javascript
-// Example: Filter users based on role
-const getUsers = (requestUser, queryParams) => {
-  let filteredUsers = allUsers;
-  
-  // Role-based filtering
-  if (requestUser.role === 'client_admin') {
-    filteredUsers = filteredUsers.filter(u => u.clientId === requestUser.clientId);
-  }
-  
-  // Query parameter filtering
-  if (queryParams.status) {
-    filteredUsers = filteredUsers.filter(u => u.status === queryParams.status);
-  }
-  
-  if (queryParams.search) {
-    const search = queryParams.search.toLowerCase();
-    filteredUsers = filteredUsers.filter(u => 
-      u.name.toLowerCase().includes(search) || 
-      u.email.toLowerCase().includes(search)
-    );
-  }
-  
-  // Pagination
-  const page = parseInt(queryParams.page) || 1;
-  const limit = Math.min(parseInt(queryParams.limit) || 10, 100);
-  const startIndex = (page - 1) * limit;
-  const endIndex = startIndex + limit;
-  
-  const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
-  
-  return {
-    users: paginatedUsers,
-    pagination: {
-      page,
-      limit,
-      total: filteredUsers.length,
-      totalPages: Math.ceil(filteredUsers.length / limit)
-    }
-  };
-};
-```
+### Access Control
+- **Admin endpoints** (`/admin-panel/*`): Require `is_staff=True`
+- **Prediction endpoints** (`/predictions/*`): Require authentication, users see only their own data
+- **League endpoints** (`/leagues/*`): Publicly accessible (no authentication required)
+- **Auth endpoints** (`/api/login/`, `/api/me/`, etc.): Login is public, others require authentication
 
 ---
 
-## Database Schema Recommendations
+## Database Schema
 
-### Users Table
-- `id` (Primary Key)
-- `name` (String, indexed)
-- `email` (String, unique, indexed)
-- `password` (String, hashed)
-- `role` (Enum: root_admin, client_admin, client_user, indexed)
-- `status` (Enum: active, inactive, indexed)
-- `clientId` (Foreign Key, indexed, nullable)
-- `createdAt` (Timestamp)
-- `updatedAt` (Timestamp)
+### Django Models
 
-### Clients Table
-- `id` (Primary Key)
-- `name` (String, indexed)
-- `adminName` (String)
-- `adminEmail` (String, indexed)
-- `status` (Enum: active, inactive, indexed)
-- `createdAt` (Timestamp)
-- `updatedAt` (Timestamp)
+The API uses Django ORM with the following models:
 
-### Matches Table
-- `id` (Primary Key)
-- `homeTeam` (String)
-- `awayTeam` (String)
-- `date` (Date, indexed)
-- `time` (Time)
-- `league` (String, indexed)
-- `locked` (Boolean, indexed)
-- `actualHomeScore` (Integer, nullable)
-- `actualAwayScore` (Integer, nullable)
-- `createdAt` (Timestamp)
-- `updatedAt` (Timestamp)
+**ClientM** (users.models)
+- `id`: Primary key
+- `name`: Client organization name
+- `admin_name`: Name of the admin user
+- `admin_email`: Email of the admin user
+- `status`: 'active' or 'inactive'
+- `created_at`, `updated_at`: Timestamps
 
-### Predictions Table
-- `id` (Primary Key)
-- `userId` (Foreign Key, indexed)
-- `matchId` (Foreign Key, indexed)
-- `homeScore` (Integer)
-- `awayScore` (Integer)
-- `points` (Integer, calculated, indexed)
-- `createdAt` (Timestamp)
-- `updatedAt` (Timestamp)
-- Unique constraint on (userId, matchId)
+**ClientUserM** (users.models)
+- `id`: Primary key
+- `user`: OneToOne to Django User model
+- `role`: 'client_admin' or 'client_user'
+- `client`: Foreign key to ClientM
+- `is_root_client_admin`: Boolean
+- `created_at`, `updated_at`: Timestamps
 
-### Indexes for Performance
-- `users`: (role, clientId), (email), (status)
-- `clients`: (name), (status)
-- `matches`: (date, locked), (league)
-- `predictions`: (userId, matchId), (matchId)
+**LeagueM, SeasonM, TeamM** (leagues.models)
+- League, season, and team information
 
----
+**MatchM** (leagues.models)
+- `id`: Primary key
+- `home_team`, `away_team`: Foreign keys to TeamM
+- `home_score`, `away_score`: Integer scores (nullable)
+- `status`: Match status (SCHEDULED, FINISHED, etc.)
+- `date`: Match date/time
+- `league`, `season`, `round`: Foreign keys
+- `created_at`, `updated_at`: Timestamps
 
-## Rate Limiting Recommendations
+**PredictionM** (predictions.models)
+- `id`: Primary key
+- `user`: Foreign key to Django User
+- `match`: Foreign key to MatchM
+- `predicted_home_score`, `predicted_away_score`: Integer predictions
+- `points_awarded`: Points earned (nullable)
+- `status`: 'pending', 'correct_result', 'correct_winner', 'incorrect', 'late'
+- `created_at`: Timestamp
+- Unique constraint on (user, match)
 
-Implement rate limiting to prevent abuse:
-
-- **Login endpoint**: 5 requests per minute per IP
-- **List endpoints**: 30 requests per minute per user
-- **Create/Update endpoints**: 10 requests per minute per user
-- **Delete endpoints**: 5 requests per minute per user
-
----
-
-## Caching Recommendations
-
-Implement caching for improved performance:
-
-- **Dashboard stats**: Cache for 5 minutes
-- **Analytics data**: Cache for 10 minutes
-- **Upcoming matches**: Cache for 1 hour
-- **Rankings**: Cache for 5 minutes, invalidate on prediction changes
-- **Client list**: Cache for 30 minutes
+**ClientRankingM, ClientRankingEntryM** (predictions.models)
+- Stores ranking snapshots for each client
 
 ---
 
 ## Security Considerations
 
-1. **Always validate and sanitize inputs** on the server side
-2. **Use parameterized queries** to prevent SQL injection
-3. **Hash passwords** using bcrypt or similar
-4. **Use HTTPS** for all API communication
-5. **Implement JWT token expiration** and refresh mechanism
-6. **Validate token on every request** and check expiration
-7. **Use CORS** properly to restrict API access
-8. **Log security events** (failed logins, unauthorized access attempts)
-9. **Implement rate limiting** to prevent brute force attacks
-10. **Never expose sensitive data** in error messages
+1. **HTTP-Only Cookies**: Tokens stored in HTTP-only cookies prevent XSS attacks
+2. **Token Expiration**: Access tokens expire in 15 minutes, refresh tokens in 7 days
+3. **Token Rotation**: Refresh tokens are rotated on use for enhanced security
+4. **HTTPS Required**: In production, cookies are sent only over HTTPS
+5. **SameSite Attribute**: Set to 'Lax' to prevent CSRF attacks
+6. **Password Hashing**: Django uses PBKDF2 by default for password hashing
+7. **Admin Endpoints**: Protected with `IsAdminUser` permission class
+8. **User Data Isolation**: Users can only see their own predictions and client data
+
+---
+
+## CORS Configuration
+
+For cross-origin requests (e.g., frontend on different domain), configure CORS in Django:
+
+```python
+# settings.py
+INSTALLED_APPS = [
+    ...
+    'corsheaders',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    ...
+]
+
+# Allow specific origins
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  # React dev server
+    "https://yourdomain.com",
+]
+
+# Allow credentials (cookies)
+CORS_ALLOW_CREDENTIALS = True
+```
+
+Install: `pip install django-cors-headers`
