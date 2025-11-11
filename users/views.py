@@ -1,229 +1,76 @@
-from django.shortcuts import render
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
-from django.contrib.auth import authenticate
-from django.conf import settings
-from users.models import ClientUserM
+from rest_framework_simplejwt.exceptions import TokenError
+from django.contrib.auth.models import User
+from users.serializers import LoginSerializer
+from administration.serializers import UserReadSerializer
+from myproject.settings import AUTH_COOKIE_SECURE, AUTH_COOKIE_SAMESITE, AUTH_COOKIE_HTTP_ONLY
 
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def login_view(request):
-    """
-    Authenticate user and set JWT tokens in HTTP-only cookies.
-    
-    Request body:
-    {
-        "email": "user@example.com",
-        "password": "password"
-    }
-    """
-    email = request.data.get('email')
-    password = request.data.get('password')
-    
-    if not email or not password:
-        return Response(
-            {'message': 'Email and password are required'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Authenticate using email (Django uses username by default)
-    # We need to get the user by email first
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
-    
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
-        return Response(
-            {'message': 'Invalid credentials'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
-    # Check password
-    if not user.check_password(password):
-        return Response(
-            {'message': 'Invalid credentials'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
-    # Check if user is active
-    if not user.is_active:
-        return Response(
-            {'message': 'User account is disabled'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
-    # Generate tokens
-    refresh = RefreshToken.for_user(user)
-    access_token = str(refresh.access_token)
-    refresh_token = str(refresh)
-    
-    # Prepare user data
-    user_data = {
-        'id': user.id,
-        'name': user.get_full_name() or user.username,
-        'email': user.email,
-    }
-    
-    # Get role from ClientUserM if exists
-    try:
-        client_user = ClientUserM.objects.get(user=user)
-        user_data['role'] = client_user.role
-        user_data['clientId'] = client_user.client.id if client_user.client else None
-        user_data['clientName'] = client_user.client.name if client_user.client else None
-    except ClientUserM.DoesNotExist:
-        # Check if superuser/staff for root_admin role
-        if user.is_superuser or user.is_staff:
-            user_data['role'] = 'root_admin'
-        else:
-            user_data['role'] = 'client_user'
-        user_data['clientId'] = None
-        user_data['clientName'] = None
-    
-    # Create response
-    response = Response({
-        'message': 'Login successful',
-        'user': user_data
-    }, status=status.HTTP_200_OK)
-    
-    # Set HTTP-only cookies
-    response.set_cookie(
-        key=settings.AUTH_COOKIE,
-        value=access_token,
-        max_age=settings.AUTH_COOKIE_MAX_AGE,
-        secure=settings.AUTH_COOKIE_SECURE,
-        httponly=settings.AUTH_COOKIE_HTTP_ONLY,
-        samesite=settings.AUTH_COOKIE_SAMESITE,
-        path=settings.AUTH_COOKIE_PATH,
-    )
-    
-    response.set_cookie(
-        key=settings.AUTH_COOKIE_REFRESH,
-        value=refresh_token,
-        max_age=settings.AUTH_COOKIE_REFRESH_MAX_AGE,
-        secure=settings.AUTH_COOKIE_SECURE,
-        httponly=settings.AUTH_COOKIE_HTTP_ONLY,
-        samesite=settings.AUTH_COOKIE_SAMESITE,
-        path=settings.AUTH_COOKIE_PATH,
-    )
-    
-    return response
+class LoginView(APIView):
+    permission_classes = (AllowAny,)
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            refresh = RefreshToken.for_user(user)
+            access = refresh.access_token
+            response = Response(data=UserReadSerializer(user).data, status=status.HTTP_200_OK)
+            response.set_cookie(key='access', value=access, httponly=AUTH_COOKIE_HTTP_ONLY,
+                                samesite=AUTH_COOKIE_SAMESITE, secure=AUTH_COOKIE_SECURE)
+            response.set_cookie(key='refresh', value=refresh, httponly=AUTH_COOKIE_HTTP_ONLY,
+                                samesite=AUTH_COOKIE_SAMESITE, secure=AUTH_COOKIE_SECURE)
+            return response
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def refresh_token_view(request):
-    """
-    Refresh the access token using the refresh token from HTTP-only cookie.
-    """
-    refresh_token = request.COOKIES.get(settings.AUTH_COOKIE_REFRESH)
-    
-    if not refresh_token:
-        return Response(
-            {'message': 'Refresh token not found'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
-    try:
+class RefreshTokenView(APIView):
+    permission_classes = (AllowAny,)
+    def post(self, request):
+        refresh_token = request.COOKIES.get('refresh')
+        if not refresh_token:
+            return Response({'detail': 'Credentials are not provided'}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            refresh = RefreshToken(refresh_token)
+            refresh.verify()
+            refresh.blacklist()
+            user = User.objects.get(id=refresh.get('user_id'))
+            new_refresh_token = RefreshToken.for_user(user)
+            access = new_refresh_token.access_token
+            response = Response(status=status.HTTP_200_OK)
+            response.set_cookie(key='access', value=access, httponly=AUTH_COOKIE_HTTP_ONLY,
+                                samesite=AUTH_COOKIE_SAMESITE, secure=AUTH_COOKIE_SECURE)
+            response.set_cookie(key='refresh', value=str(new_refresh_token),  httponly=AUTH_COOKIE_HTTP_ONLY,
+                                samesite=AUTH_COOKIE_SAMESITE, secure=AUTH_COOKIE_SECURE)
+            return response
+        except TokenError:
+            return Response({'detail': 'Invalid token'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class LogoutView(APIView):
+    permission_classes = (IsAuthenticated,)
+    def post(self, request):
+        refresh_token = request.COOKIES.get('refresh')
         refresh = RefreshToken(refresh_token)
-        access_token = str(refresh.access_token)
-        
-        # Create response
-        response = Response({
-            'message': 'Token refreshed successfully'
-        }, status=status.HTTP_200_OK)
-        
-        # Set new access token cookie
-        response.set_cookie(
-            key=settings.AUTH_COOKIE,
-            value=access_token,
-            max_age=settings.AUTH_COOKIE_MAX_AGE,
-            secure=settings.AUTH_COOKIE_SECURE,
-            httponly=settings.AUTH_COOKIE_HTTP_ONLY,
-            samesite=settings.AUTH_COOKIE_SAMESITE,
-            path=settings.AUTH_COOKIE_PATH,
-        )
-        
-        # If ROTATE_REFRESH_TOKENS is True, also set new refresh token
-        if settings.SIMPLE_JWT.get('ROTATE_REFRESH_TOKENS', False):
-            new_refresh_token = str(refresh)
-            response.set_cookie(
-                key=settings.AUTH_COOKIE_REFRESH,
-                value=new_refresh_token,
-                max_age=settings.AUTH_COOKIE_REFRESH_MAX_AGE,
-                secure=settings.AUTH_COOKIE_SECURE,
-                httponly=settings.AUTH_COOKIE_HTTP_ONLY,
-                samesite=settings.AUTH_COOKIE_SAMESITE,
-                path=settings.AUTH_COOKIE_PATH,
-            )
-        
+        refresh.verify()
+        refresh.blacklist()
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        response.delete_cookie(key='access')
+        response.delete_cookie(key='refresh')
         return response
-        
-    except (TokenError, InvalidToken) as e:
-        return Response(
-            {'message': 'Invalid or expired refresh token'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def logout_view(request):
-    """
-    Logout user by clearing JWT cookies.
-    """
-    response = Response({
-        'message': 'Logout successful'
-    }, status=status.HTTP_200_OK)
-    
-    # Delete cookies
-    response.delete_cookie(
-        key=settings.AUTH_COOKIE,
-        path=settings.AUTH_COOKIE_PATH,
-    )
-    
-    response.delete_cookie(
-        key=settings.AUTH_COOKIE_REFRESH,
-        path=settings.AUTH_COOKIE_PATH,
-    )
-    
-    return response
+class MeView(APIView):
+    permission_classes = (IsAuthenticated,)
+    def get(self, request):
+        user = self.request.user
+        serializer = UserReadSerializer(user)
+        return Response(serializer.data)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def me_view(request):
-    """
-    Get current user information.
-    """
-    user = request.user
-    user_data = {
-        'id': user.id,
-        'name': user.get_full_name() or user.username,
-        'email': user.email,
-    }
-    
-    # Get role from ClientUserM if exists
-    try:
-        client_user = ClientUserM.objects.get(user=user)
-        user_data['role'] = client_user.role
-        user_data['clientId'] = client_user.client.id if client_user.client else None
-        user_data['clientName'] = client_user.client.name if client_user.client else None
-    except ClientUserM.DoesNotExist:
-        # Check if superuser/staff for root_admin role
-        if user.is_superuser or user.is_staff:
-            user_data['role'] = 'root_admin'
-        else:
-            user_data['role'] = 'client_user'
-        user_data['clientId'] = None
-        user_data['clientName'] = None
-    
-    return Response({
-        'user': user_data
-    }, status=status.HTTP_200_OK)
+
 

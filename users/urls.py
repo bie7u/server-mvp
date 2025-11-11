@@ -1,9 +1,10 @@
 from django.urls import path
-from users.views import login_view, logout_view, refresh_token_view, me_view
+from users.views import LoginView, RefreshTokenView, LogoutView, MeView
+
 
 urlpatterns = [
-    path('login/', login_view, name='login'),
-    path('logout/', logout_view, name='logout'),
-    path('refresh/', refresh_token_view, name='refresh'),
-    path('me/', me_view, name='me'),
+    path('login/', LoginView.as_view(), name='login'),
+    path('logout/', LogoutView.as_view(), name='logout'),
+    path('refresh/', RefreshTokenView.as_view(), name='refresh'),
+    path('me/', MeView.as_view(), name='me'),
 ]
